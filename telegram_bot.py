@@ -31,7 +31,7 @@ def authorized(func):
 
 
 # ── Bot mode state ───────────────────────────────────────
-bot_running  = False           # Start paused to prevent startup spam
+bot_running  = True            # Enabled by default as per user request
 bot_mode     = "auto"
 coin_enabled = {c: True for c in config.COINS}
 
