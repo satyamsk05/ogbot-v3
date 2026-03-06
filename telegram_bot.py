@@ -129,14 +129,17 @@ async def update_dashboard(new_event: str | None = None):
 
 def kb_dashboard() -> InlineKeyboardMarkup:
     """Inline Dashboard buttons matching the premium design."""
+    # Toggle button label based on current state
+    ctrl_btn = InlineKeyboardButton("🔴 STOP BOT", callback_data="ctrl_toggle") if bot_running else \
+               InlineKeyboardButton("🟢 START BOT", callback_data="ctrl_toggle")
+    
     keyboard = [
         [
             InlineKeyboardButton("🔋 STATUS", callback_data="dash_refresh"),
             InlineKeyboardButton("💎 " + ("V-WALLET" if config.PAPER_TRADING else "WALLET"), callback_data="dash_refresh")
         ],
         [
-            InlineKeyboardButton("🟢 START BOT", callback_data="ctrl_start"),
-            InlineKeyboardButton("🔴 STOP BOT", callback_data="ctrl_stop")
+            ctrl_btn
         ],
         [
             InlineKeyboardButton("⚡ MARTINGALE RESET", callback_data="ctrl_reset"),
@@ -466,12 +469,10 @@ async def handle_buttons(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     action_taken = False
 
     # ── Dashboard Control ──
-    if data == "ctrl_start":
-        bot_running = True
-        await update_dashboard("🟢 *Bot Started*")
-    elif data == "ctrl_stop":
-        bot_running = False
-        await update_dashboard("🔴 *Bot Stopped*")
+    if data == "ctrl_toggle":
+        bot_running = not bot_running
+        status = "🟢 *Bot Started*" if bot_running else "🔴 *Bot Stopped*"
+        await update_dashboard(status)
     elif data == "ctrl_reset":
         reset_all_martingales()
         await update_dashboard("⚡ *Steps Reset to 1*")
