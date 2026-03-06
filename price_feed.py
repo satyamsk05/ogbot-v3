@@ -47,14 +47,14 @@ def fetch_klines(coin: str, interval: str = "5m", limit: int = 10):
         return []
 
 def fetch_polymarket_candles(coin: str, interval: str = "15m", limit: int = 5):
-    """Fetch recent outcomes from Polymarket events for the coin."""
+    """Fetch recent outcomes from Polymarket events for the coin (Early detection)."""
     try:
         results = []
         now = int(time.time())
         step = 300 if interval == "5m" else 900
         
-        # Look back up to 10 markets to find 'limit' resolved ones
-        for i in range(10):
+        # Start looking from the previous interval (the one that should have just closed)
+        for i in range(1, 10):
             ts = ((now // step) - i) * step
             slug = f"{coin.lower()}-updown-{interval}-{ts}"
             url = f"https://gamma-api.polymarket.com/events?slug={slug}"
@@ -72,8 +72,21 @@ def fetch_polymarket_candles(coin: str, interval: str = "15m", limit: int = 5):
                             outcomes = json.loads(outcomes_raw)
                             prices = json.loads(prices_raw)
                             
+                            # Detection Logic:
+                            # 1. Price is exactly "1" (officially resolved)
+                            # 2. Market is past expiration AND a price is > 0.8 (highly likely winner)
+                            winner_idx = -1
                             if "1" in prices:
-                                winner = outcomes[prices.index("1")].lower()
+                                winner_idx = prices.index("1")
+                            elif now > (ts + step): # Past expiration
+                                # Find index of highest price
+                                float_prices = [float(p) for p in prices]
+                                max_p = max(float_prices)
+                                if max_p > 0.8:
+                                    winner_idx = float_prices.index(max_p)
+
+                            if winner_idx != -1:
+                                winner = outcomes[winner_idx].lower()
                                 color = "GREEN" if winner in ["up", "yes", "higher"] else "RED"
                                 results.append({
                                     "time": datetime.fromtimestamp(ts).strftime("%H:%M"),
@@ -84,7 +97,7 @@ def fetch_polymarket_candles(coin: str, interval: str = "15m", limit: int = 5):
                                     break
             except Exception:
                 pass
-            time.sleep(0.05)
+            time.sleep(0.02)
         
         return results[::-1]
     except Exception as e:
@@ -103,8 +116,6 @@ def update_all_candles():
             candles[coin] = data
 
 
-
-
 def _on_message(ws, message):
     data = json.loads(message)
     if "data" in data:
@@ -117,17 +128,15 @@ def _on_message(ws, message):
 
 
 def _on_error(ws, error):
-    print(f"[PriceFeed] WebSocket error: {error}")
+    pass
 
 
 def _on_close(ws, *args):
-    print("[PriceFeed] WebSocket closed — reconnecting in 5s...")
     import time; time.sleep(5)
     start()
 
 
 def _on_open(ws):
-    streams = "/".join([f"{s}@ticker" for s in SYMBOL_MAP.values()])
     ws.send(json.dumps({
         "method": "SUBSCRIBE",
         "params": [f"{s}@ticker" for s in SYMBOL_MAP.values()],
@@ -136,16 +145,16 @@ def _on_open(ws):
 
 
 def _candle_loop():
-    """Background loop to update candles periodically."""
-    print("[PriceFeed] Candle background loop started ✅")
+    """Background loop to update candles periodically (Fast Refresh)."""
     while True:
         try:
             update_all_candles()
+            # print(f"[PriceFeed] Candles updated at {datetime.now().strftime('%H:%M:%S')}")
         except Exception as e:
             print(f"[PriceFeed] Error in candle loop: {e}")
         
-        # Update every 60 seconds (or more frequently if needed)
-        time.sleep(60)
+        # Increase frequency for a more responsive UI
+        time.sleep(15)
 
 def start():
     """Start Binance WebSocket price feed and candle loop."""
