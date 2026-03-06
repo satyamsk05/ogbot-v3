@@ -1,0 +1,8 @@
+py-clob-client>=0.17.0
+python-telegram-bot[job-queue]>=21.0
+websocket-client>=1.7.0
+rich>=13.7.0
+python-dotenv>=1.0.0
+requests>=2.31.0
+pandas>=2.0.0
+matplotlib>=3.8.0

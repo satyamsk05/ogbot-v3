@@ -1,0 +1,283 @@
+"""
+main.py
+Main bot loop — terminal dashboard, auto betting, crash recovery.
+"""
+
+import asyncio
+import os
+import random
+import sys
+import time
+from datetime import datetime
+
+from rich.console import Console
+from rich.live import Live
+from rich.table import Table
+from rich.text import Text
+from rich import box
+
+import config
+import price_feed
+import betting
+from betting import states, place_bet, record_result, get_balance, simulate_result
+import telegram_bot as tg
+
+console = Console()
+
+# ── Crash counter ────────────────────────────────────────
+crash_count = 0
+
+
+# ── Terminal Dashboard ───────────────────────────────────
+def build_dashboard() -> Table:
+    p = price_feed.get_all_prices()
+    bal = get_balance()
+
+    # Outer table
+    table = Table(
+        title="🤖 POLYMARKET BOT — LIVE",
+        box=box.DOUBLE_EDGE,
+        style="bold cyan",
+        show_header=False,
+        expand=True,
+    )
+    table.add_column("Content", justify="left")
+
+    # ── Prices ──
+    price_lines = []
+    for coin in config.COINS:
+        pr = p.get(coin, 0.0)
+        decimals = 4 if coin == "XRP" else 2
+        price_lines.append(f"  {coin}: ${pr:,.{decimals}f}")
+    table.add_row("\n".join(price_lines))
+    table.add_row("─" * 50)
+
+    # ── Martingale status ──
+    for coin in config.COINS:
+        s = states[coin]
+        status = "🛑 STOPPED" if s.stopped else ("✅" if s.active else "⏸")
+        table.add_row(
+            f"  {coin} {status}  Step {s.step}/{config.MAX_STEPS}  "
+            f"Bet: ${s.next_bet_amount():.0f}  Session: ${s.session_pnl:.2f}"
+        )
+    table.add_row("─" * 50)
+
+    # ── Net P&L + Balance ──
+    total_pnl = sum(states[c].session_pnl for c in config.COINS)
+    mode_label = tg.bot_mode.upper() if hasattr(tg, "bot_mode") else "AUTO"
+    table.add_row(
+        f"  Net P&L: ${total_pnl:.2f}  |  Balance: ${bal:.2f}  |  Mode: {mode_label}"
+    )
+    table.add_row("─" * 50)
+
+    # ── Last 5 candles per coin ──
+    source_label = f"({config.CANDLE_SOURCE})"
+    table.add_row(f"  --- Last 5 Candles {source_label} ---")
+    for coin in config.COINS:
+        coin_candles = price_feed.candles.get(coin, [])
+        history_icons = []
+        # Get last 5 and format as UP/DOWN or icons
+        for c in coin_candles[-5:]:
+            icon = "[bold green]UP[/bold green]" if c["color"] == "GREEN" else "[bold red]DOWN[/bold red]"
+            history_icons.append(icon)
+        
+        history_str = " ".join(history_icons) if history_icons else "Loading data..."
+        table.add_row(f"  {coin}: {history_str}")
+
+    table.add_row(f"\n  🕐 {datetime.now().strftime('%H:%M:%S')}")
+    return table
+
+
+# ── Strategy State ───────────────────────────────────────
+strategy_state = {
+    coin: {
+        "last_candle_time": "",
+        "in_recovery": False,
+        "active_side": None,
+        "waiting_for_pattern": True
+    } for coin in config.COINS
+}
+
+# ── Auto Betting Loop (3-Candle Trend Strategy) ──────────
+async def auto_bet_loop():
+    """
+    3-Candle Strategy:
+    1. Wait for 3 identical candles (e.g. R-R-R).
+    2. Place bet on 4th candle in the SAME direction.
+    3. If Win: Reset and wait for the NEXT 3-candle pattern.
+    4. If Loss: Martingale ON THE NEXT candle in same direction until Win.
+    """
+    console.print(f"[bold yellow]📊 Strategy Initialized: {config.STRATEGY_CANDLES}-Candle {config.STRATEGY_TYPE.upper()}[/bold yellow]")
+    
+    while True:
+        if tg.bot_running and tg.bot_mode == "auto":
+            # Update candles first
+            price_feed.update_all_candles()
+
+            for coin in config.COINS:
+                s = states[coin]
+                st = strategy_state[coin]
+
+                if not s.active or s.stopped:
+                    continue
+                if not tg.coin_enabled.get(coin, True):
+                    continue
+
+                coin_candles = price_feed.candles.get(coin, [])
+                if len(coin_candles) < config.STRATEGY_CANDLES:
+                    continue
+
+                last_candle = coin_candles[-1]
+                last_time = last_candle['time']
+
+                # Only process once per candle close
+                if last_time == st["last_candle_time"]:
+                    continue
+                
+                st["last_candle_time"] = last_time
+                
+                # ── Step 1: Check Result of existing bet if any ──
+                if st["active_side"]:
+                    # Result is the color of the candle that just closed
+                    won = (st["active_side"] == "UP" and last_candle["color"] == "GREEN") or \
+                          (st["active_side"] == "DOWN" and last_candle["color"] == "RED")
+                    
+                    amount = s.next_bet_amount()
+                    outcome, pnl = record_result(coin, st["active_side"], won, amount)
+
+                    if won:
+                        await tg.notify_win(coin, amount, pnl)
+                        st["in_recovery"] = False
+                        st["waiting_for_pattern"] = True
+                        st["active_side"] = None
+                    else:
+                        await tg.notify_loss(coin, amount)
+                        st["in_recovery"] = True
+                        # st["waiting_for_pattern"] remains False, we bet on next candle
+                
+                # ── Step 2: Signal Detection / Next Bet ──
+                direction = None
+                
+                if st["waiting_for_pattern"]:
+                    # Wait for 3-in-a-row
+                    recent_colors = [c['color'] for c in coin_candles[-config.STRATEGY_CANDLES:]]
+                    if all(c == "RED" for c in recent_colors):
+                        direction = "DOWN" if config.STRATEGY_TYPE == "trend" else "UP"
+                    elif all(c == "GREEN" for c in recent_colors):
+                        direction = "UP" if config.STRATEGY_TYPE == "trend" else "DOWN"
+                    
+                    if direction:
+                        st["waiting_for_pattern"] = False
+                        st["active_side"] = direction
+                elif st["in_recovery"]:
+                    # Martingale on next candle (stay in same direction)
+                    direction = st["active_side"]
+
+                # ── Step 3: Place Bet ──
+                if direction:
+                    amount = s.next_bet_amount()
+                    await tg.notify_bet_placed(coin, direction, amount, s.step)
+                    place_bet(coin, direction)
+
+            # Check Balance
+            bal = get_balance()
+            if bal < config.BALANCE_LOW_ALERT:
+                await tg.notify_balance_low(bal)
+
+        # Precise Sleep: Wait until ~1 second after the candle close
+        now = time.time()
+        interval_secs = 300 if config.STRATEGY_INTERVAL == "5m" else 900
+        time_into_interval = now % interval_secs
+        sleep_time = interval_secs - time_into_interval + 1 # 1 second after close
+        
+        # If we are very close to next check, just wait a bit
+        if sleep_time < 2: 
+            sleep_time = interval_secs + 1
+            
+        # Limit sleep to max 30s to keep dashboard alive
+        final_sleep = min(sleep_time, 30)
+        await asyncio.sleep(final_sleep)
+
+
+# ── Daily Summary ────────────────────────────────────────
+async def daily_summary_loop():
+    """Send daily P&L summary at midnight."""
+    while True:
+        now = datetime.now()
+        # Sleep until next midnight
+        seconds_until_midnight = (
+            (24 - now.hour - 1) * 3600 +
+            (60 - now.minute - 1) * 60 +
+            (60 - now.second)
+        )
+        await asyncio.sleep(seconds_until_midnight)
+        await tg.notify_daily_summary()
+
+
+# ── Terminal Dashboard Loop ───────────────────────────────
+def run_dashboard():
+    with Live(build_dashboard(), refresh_per_second=1, console=console) as live:
+        while True:
+            live.update(build_dashboard())
+            time.sleep(1)
+
+
+# ── Main Entry ───────────────────────────────────────────
+def main():
+    global crash_count
+
+    console.print("[bold green]🚀 Starting Polymarket Bot...[/bold green]")
+
+    # Start price feed
+    price_feed.start()
+    time.sleep(2)  # Let WebSocket connect
+
+    # Start Telegram bot
+    tg.start_telegram_bot()
+    time.sleep(2)
+
+    console.print("[bold green]✅ All systems ready![/bold green]")
+
+    # Start async loops in background
+    import threading
+
+    def run_async():
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        loop.run_until_complete(asyncio.gather(
+            auto_bet_loop(),
+            daily_summary_loop(),
+        ))
+
+    async_thread = threading.Thread(target=run_async, daemon=True)
+    async_thread.start()
+
+    # Run terminal dashboard (blocks main thread)
+    run_dashboard()
+
+
+# ── Crash Recovery Wrapper ───────────────────────────────
+if __name__ == "__main__":
+    while True:
+        try:
+            main()
+        except KeyboardInterrupt:
+            console.print("\n[bold red]Bot stopped by user.[/bold red]")
+            sys.exit(0)
+        except Exception as e:
+            crash_count += 1
+            console.print(f"[bold red]❌ Crash #{crash_count}: {e}[/bold red]")
+
+            # Notify Telegram
+            try:
+                import asyncio
+                asyncio.run(tg.notify_restart(crash_count))
+            except Exception:
+                pass
+
+            if crash_count >= config.MAX_CRASHES:
+                console.print("[bold red]🛑 Max crashes reached. Bot shutting down.[/bold red]")
+                sys.exit(1)
+
+            console.print(f"[yellow]Restarting in {config.RESTART_DELAY}s...[/yellow]")
+            time.sleep(config.RESTART_DELAY)
