@@ -107,6 +107,52 @@ def get_dashboard_text() -> str:
     return "\n".join(lines)
 
 
+def get_history_text() -> str:
+    """Generates formatted string of recent trade history."""
+    from betting import get_recent_history
+    hist = get_recent_history(15)
+    
+    if not hist:
+        return "📋 *Trading History*\n\n`No logs found. Start trading to see history!`"
+        
+    lines = ["📋 *Recent Trading History*", "━━━━━━━━━━━━━━━━━━━━━━━━"]
+    for h in hist:
+        res_emoji = "🟢" if h["res"] == "WIN" else "🔴"
+        pnl_val = float(h["pnl"])
+        pnl_str = f"+${pnl_val:.2f}" if pnl_val >= 0 else f"-${abs(pnl_val):.2f}"
+        
+        # Format: 12:05 | ETH UP | WIN | +$2.00
+        time_short = h["ts"].split(" ")[1][:5]
+        lines.append(f"`{time_short}` {res_emoji} *{h['coin']}* {h['dir']} | {pnl_str}")
+        
+    lines.append("━━━━━━━━━━━━━━━━━━━━━━━━")
+    return "\n".join(lines)
+
+
+def get_wallet_text() -> str:
+    """Generates detailed wallet performance breakdown."""
+    bal = get_balance()
+    total_pnl = sum(states[c].session_pnl for c in config.COINS)
+    bal_type = "🧪 VIRTUAL" if config.PAPER_TRADING else "💳 REAL"
+    
+    lines = [
+        f"💎 *{bal_type} WALLET STATUS*",
+        "━━━━━━━━━━━━━━━━━━━━━━━━",
+        f"💳 *Balance:* `${bal:.2f}` USDC",
+        f"📈 *Total P&L:* `${total_pnl:.2f}`",
+        "──────────────────",
+        "🪙 *Coin Performance:*"
+    ]
+    
+    for coin in config.COINS:
+        s = states[coin]
+        emoji = "📈" if s.session_pnl >= 0 else "📉"
+        lines.append(f"{emoji} `{coin:4}`: `${s.session_pnl:+.2f}` (Step {s.step})")
+        
+    lines.append("━━━━━━━━━━━━━━━━━━━━━━━━")
+    return "\n".join(lines)
+
+
 async def update_dashboard(new_event: str | None = None):
     """Edits the existing dashboard message (Thread-Safe)."""
     return await _safe_run(_update_dashboard_logic(new_event))
@@ -160,7 +206,7 @@ def kb_dashboard() -> InlineKeyboardMarkup:
     keyboard = [
         [
             InlineKeyboardButton("🔋 STATUS", callback_data="dash_refresh"),
-            InlineKeyboardButton("💎 " + ("V-WALLET" if config.PAPER_TRADING else "WALLET"), callback_data="dash_refresh")
+            InlineKeyboardButton("💎 " + ("V-WALLET" if config.PAPER_TRADING else "WALLET"), callback_data="dash_wallet")
         ],
         [
             ctrl_btn
@@ -505,7 +551,17 @@ async def handle_buttons(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             reset_all_martingales()
             await update_dashboard("⚡ *Steps Reset to 1*")
         elif data == "ctrl_history":
-            await cmd_history(update, ctx)
+            await query.edit_message_text(
+                get_history_text(),
+                parse_mode="Markdown",
+                reply_markup=kb_dashboard()
+            )
+        elif data == "dash_wallet":
+            await query.edit_message_text(
+                get_wallet_text(),
+                parse_mode="Markdown",
+                reply_markup=kb_dashboard()
+            )
         elif data == "dash_refresh":
             price_feed.update_all_candles() # Force fresh fetch
             await update_dashboard()
