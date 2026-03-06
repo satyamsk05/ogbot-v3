@@ -86,18 +86,24 @@ def get_dashboard_text() -> str:
     ])
     
     for coin in config.COINS:
-        s = states[coin]
-        # Get last 5 candle colors from price_feed
-        coin_candles = price_feed.candles.get(coin, [])
-        history_str = "".join(["🟢" if c["color"] == "GREEN" else "🔴" for c in coin_candles[-5:]])
-        
-        from main import strategy_state # Import here to avoid circular
-        st = strategy_state[coin]
-        strat_status = "⌛ Waiting Pattern" if st["waiting_for_pattern"] else f"🎯 Active {st['active_side']}"
-        
-        lines.append(f"`{coin}`: {history_str} | {strat_status}")
-        lines.append(f"   Step {s.step} | P&L `${s.session_pnl:.2f}`")
-        
+        try:
+            s = states[coin]
+            # Get last 5 candle colors from price_feed
+            coin_candles = price_feed.candles.get(coin, [])
+            history_str = "".join(["🟢" if c["color"] == "GREEN" else "🔴" for c in coin_candles[-5:]])
+            
+            from main import strategy_state # Import here to avoid circular
+            st = strategy_state.get(coin, {})
+            waiting = st.get("waiting_for_pattern", True)
+            side    = st.get("active_side", "NONE")
+            
+            strat_status = "⌛ Waiting" if waiting else f"🎯 Active {side}"
+            
+            lines.append(f"`{coin}`: {history_str} | {strat_status}")
+            lines.append(f"   Step {s.step} | P&L `${s.session_pnl:.2f}`")
+        except Exception as e:
+            lines.append(f"`{coin}`: Data loading... ({e})")
+            
     return "\n".join(lines)
 
 
@@ -479,134 +485,140 @@ async def cmd_mode(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 # ══════════════════════════════════════════════════════════
 
 async def handle_buttons(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
+    try:
+        query = update.callback_query
+        await query.answer()
 
-    if query.from_user.id != config.TELEGRAM_USER_ID:
-        await query.answer("❌ Unauthorized", show_alert=True)
-        return
+        if query.from_user.id != config.TELEGRAM_USER_ID:
+            await query.answer("❌ Unauthorized", show_alert=True)
+            return
 
-    data = query.data
-    global bot_running, bot_mode
+        data = query.data
+        global bot_running, bot_mode
 
-    action_taken = False
+        # ── Dashboard Control ──
+        if data == "ctrl_toggle":
+            bot_running = not bot_running
+            status = "🟢 *Bot Started*" if bot_running else "🔴 *Bot Stopped*"
+            await update_dashboard(status)
+        elif data == "ctrl_reset":
+            reset_all_martingales()
+            await update_dashboard("⚡ *Steps Reset to 1*")
+        elif data == "ctrl_history":
+            await cmd_history(update, ctx)
+        elif data == "dash_refresh":
+            price_feed.update_all_candles() # Force fresh fetch
+            await update_dashboard()
 
-    # ── Dashboard Control ──
-    if data == "ctrl_toggle":
-        bot_running = not bot_running
-        status = "🟢 *Bot Started*" if bot_running else "🔴 *Bot Stopped*"
-        await update_dashboard(status)
-    elif data == "ctrl_reset":
-        reset_all_martingales()
-        await update_dashboard("⚡ *Steps Reset to 1*")
-    elif data == "ctrl_history":
-        await cmd_history(update, ctx)
-    elif data == "dash_refresh":
-        price_feed.update_all_candles() # Force fresh fetch
-        await update_dashboard()
+        # ── Mode Switch (from /mode command) ──
+        elif data == "mode_auto":
+            bot_mode = "auto"
+            auto_label   = "🤖 Auto ✅"  if bot_mode == "auto"   else "🤖 Auto"
+            manual_label = "🖐 Manual ✅" if bot_mode == "manual" else "🖐 Manual"
+            await query.edit_message_text("✅ Mode: *AUTO*", parse_mode="Markdown", reply_markup=InlineKeyboardMarkup([[
+                InlineKeyboardButton(auto_label,   callback_data="mode_auto"),
+                InlineKeyboardButton(manual_label, callback_data="mode_manual"),
+            ]]))
+            return # Don't refresh dashboard, stay on mode switch
 
-    # ── Mode Switch (from /mode command) ──
-    elif data == "mode_auto":
-        bot_mode = "auto"
-        auto_label   = "🤖 Auto ✅"  if bot_mode == "auto"   else "🤖 Auto"
-        manual_label = "🖐 Manual ✅" if bot_mode == "manual" else "🖐 Manual"
-        await query.edit_message_text("✅ Mode: *AUTO*", parse_mode="Markdown", reply_markup=InlineKeyboardMarkup([[
-            InlineKeyboardButton(auto_label,   callback_data="mode_auto"),
-            InlineKeyboardButton(manual_label, callback_data="mode_manual"),
-        ]]))
-        return # Don't refresh dashboard, stay on mode switch
+        elif data == "mode_manual":
+            bot_mode = "manual"
+            auto_label   = "🤖 Auto ✅"  if bot_mode == "auto"   else "🤖 Auto"
+            manual_label = "🖐 Manual ✅" if bot_mode == "manual" else "🖐 Manual"
+            await query.edit_message_text("✅ Mode: *MANUAL*", parse_mode="Markdown", reply_markup=InlineKeyboardMarkup([[
+                InlineKeyboardButton(auto_label,   callback_data="mode_auto"),
+                InlineKeyboardButton(manual_label, callback_data="mode_manual"),
+            ]]))
+            return # Don't refresh dashboard, stay on mode switch
 
-    elif data == "mode_manual":
-        bot_mode = "manual"
-        auto_label   = "🤖 Auto ✅"  if bot_mode == "auto"   else "🤖 Auto"
-        manual_label = "🖐 Manual ✅" if bot_mode == "manual" else "🖐 Manual"
-        await query.edit_message_text("✅ Mode: *MANUAL*", parse_mode="Markdown", reply_markup=InlineKeyboardMarkup([[
-            InlineKeyboardButton(auto_label,   callback_data="mode_auto"),
-            InlineKeyboardButton(manual_label, callback_data="mode_manual"),
-        ]]))
-        return # Don't refresh dashboard, stay on mode switch
+        # ── Coin Toggle (from /coin command) ──
+        elif data.startswith("coin_"):
+            coin = data.split("_")[1]
+            if coin in config.COINS:
+                coin_enabled[coin]  = not coin_enabled.get(coin, True)
+                states[coin].active = coin_enabled[coin]
+                status = "ON ✅" if coin_enabled[coin] else "OFF ❌"
+                
+                buttons = []
+                for c in config.COINS:
+                    label = f"{c} ✅" if coin_enabled.get(c, True) else f"{c} ❌"
+                    buttons.append(InlineKeyboardButton(label, callback_data=f"coin_{c}"))
 
-    # ── Coin Toggle (from /coin command) ──
-    elif data.startswith("coin_"):
-        coin = data.split("_")[1]
-        if coin in config.COINS:
-            coin_enabled[coin]  = not coin_enabled.get(coin, True)
-            states[coin].active = coin_enabled[coin]
-            status = "ON ✅" if coin_enabled[coin] else "OFF ❌"
-            
-            buttons = []
-            for c in config.COINS:
-                label = f"{c} ✅" if coin_enabled.get(c, True) else f"{c} ❌"
-                buttons.append(InlineKeyboardButton(label, callback_data=f"coin_{c}"))
+                await query.edit_message_text(
+                    f"🪙 `{coin}` is now *{status}*\n\nToggle coins:",
+                    parse_mode="Markdown",
+                    reply_markup=InlineKeyboardMarkup([buttons])
+                )
+            return # Don't refresh dashboard, stay on coin toggle
 
-            await query.edit_message_text(
-                f"🪙 `{coin}` is now *{status}*\n\nToggle coins:",
-                parse_mode="Markdown",
-                reply_markup=InlineKeyboardMarkup([buttons])
-            )
-        return # Don't refresh dashboard, stay on coin toggle
+        # ── Bet Direction (ETH/SOL/XRP/ALL + UP/DOWN) ──
+        elif data.startswith("bet_"):
+            parts     = data.split("_")
+            coin_arg  = parts[1]
+            direction = parts[2]
+            coins_to_bet = config.COINS if coin_arg == "ALL" else [coin_arg]
 
-    # ── Bet Direction (ETH/SOL/XRP/ALL + UP/DOWN) ──
-    elif data.startswith("bet_"):
-        parts     = data.split("_")
-        coin_arg  = parts[1]
-        direction = parts[2]
-        coins_to_bet = config.COINS if coin_arg == "ALL" else [coin_arg]
+            lines = []
+            for coin in coins_to_bet:
+                if coin not in config.COINS:
+                    continue
+                s   = states[coin]
+                amt = s.next_bet_amount()
+                lines.append(f"🎯 *{coin} {direction}* — `${amt:.0f}` (Step {s.step})")
 
-        lines = []
-        for coin in coins_to_bet:
-            if coin not in config.COINS:
-                continue
-            s   = states[coin]
+            confirm_text = "\n".join(lines) + "\n\nConfirm?"
+            # For ALL, use first coin's confirm (multi-confirm)
+            first_coin = coins_to_bet[0]
+            s   = states[first_coin]
             amt = s.next_bet_amount()
-            lines.append(f"🎯 *{coin} {direction}* — `${amt:.0f}` (Step {s.step})")
 
-        confirm_text = "\n".join(lines) + "\n\nConfirm?"
-        # For ALL, use first coin's confirm (multi-confirm)
-        first_coin = coins_to_bet[0]
-        s   = states[first_coin]
-        amt = s.next_bet_amount()
-
-        if coin_arg == "ALL":
-            keyboard = InlineKeyboardMarkup([[
-                InlineKeyboardButton("✅ Confirm All", callback_data=f"confirm_ALL_{direction}_{amt}"),
-                InlineKeyboardButton("❌ Cancel",      callback_data="cancel_bet"),
-            ]])
-        else:
-            keyboard = InlineKeyboardMarkup([[
-                InlineKeyboardButton("✅ Confirm", callback_data=f"confirm_{first_coin}_{direction}_{amt}"),
-                InlineKeyboardButton("❌ Cancel",  callback_data="cancel_bet"),
-            ]])
-
-        await query.edit_message_text(confirm_text, parse_mode="Markdown", reply_markup=keyboard)
-        return # Don't refresh dashboard, stay on bet confirmation
-
-    # ── Bet Confirm ──
-    elif data.startswith("confirm_"):
-        parts     = data.split("_")
-        coin_arg  = parts[1]
-        direction = parts[2]
-        coins_to_bet = config.COINS if coin_arg == "ALL" else [coin_arg]
-
-        results = []
-        for coin in coins_to_bet:
-            if coin not in config.COINS:
-                continue
-            s   = states[coin]
-            amt = s.next_bet_amount()
-            result = place_bet(coin, direction)
-            if result:
-                results.append(f"✅ {coin} {direction} `${amt:.0f}` placed!")
+            if coin_arg == "ALL":
+                keyboard = InlineKeyboardMarkup([[
+                    InlineKeyboardButton("✅ Confirm All", callback_data=f"confirm_ALL_{direction}_{amt}"),
+                    InlineKeyboardButton("❌ Cancel",      callback_data="cancel_bet"),
+                ]])
             else:
-                results.append(f"❌ {coin} bet failed")
+                keyboard = InlineKeyboardMarkup([[
+                    InlineKeyboardButton("✅ Confirm", callback_data=f"confirm_{first_coin}_{direction}_{amt}"),
+                    InlineKeyboardButton("❌ Cancel",  callback_data="cancel_bet"),
+                ]])
 
-        await query.edit_message_text("\n".join(results), parse_mode="Markdown", reply_markup=kb_dashboard())
-        return # Refresh dashboard after bet
-    
-    # ── Cancel ──
-    elif data == "cancel_bet":
-        await query.edit_message_text("❌ *Bet cancelled.*", parse_mode="Markdown", reply_markup=kb_dashboard())
-        return # Refresh dashboard after cancel
+            await query.edit_message_text(confirm_text, parse_mode="Markdown", reply_markup=keyboard)
+            return # Don't refresh dashboard, stay on bet confirmation
+
+        # ── Bet Confirm ──
+        elif data.startswith("confirm_"):
+            parts     = data.split("_")
+            coin_arg  = parts[1]
+            direction = parts[2]
+            coins_to_bet = config.COINS if coin_arg == "ALL" else [coin_arg]
+
+            results = []
+            for coin in coins_to_bet:
+                if coin not in config.COINS:
+                    continue
+                s   = states[coin]
+                amt = s.next_bet_amount()
+                result = place_bet(coin, direction)
+                if result:
+                    results.append(f"✅ {coin} {direction} `${amt:.0f}` placed!")
+                else:
+                    results.append(f"❌ {coin} bet failed")
+
+            await query.edit_message_text("\n".join(results), parse_mode="Markdown", reply_markup=kb_dashboard())
+            return # Refresh dashboard after bet
+        
+        # ── Cancel ──
+        elif data == "cancel_bet":
+            await query.edit_message_text("❌ *Bet cancelled.*", parse_mode="Markdown", reply_markup=kb_dashboard())
+            return # Refresh dashboard after cancel
+
+    except Exception as e:
+        print(f"[Telegram] Callback Error: {e}")
+        try:
+            await update.callback_query.answer(f"❌ Error: {e}", show_alert=True)
+        except:
+            pass
 
     # Silent dashboard update
     return
@@ -684,6 +696,15 @@ def start_telegram_bot():
 
         # Inline button handler
         _app.add_handler(CallbackQueryHandler(handle_buttons))
+
+        # Global error handler
+        async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+            print(f"[Telegram] Global Error: {context.error}")
+            # Silently handle common network errors
+            if "Query is too old" in str(context.error) or "Message is not modified" in str(context.error):
+                return
+            
+        _app.add_error_handler(error_handler)
 
         print("[Telegram] Dashboard Bot started ✅")
         await _app.initialize()

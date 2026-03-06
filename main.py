@@ -114,11 +114,11 @@ strategy_state = {
 # ── Auto Betting Loop (3-Candle Trend Strategy) ──────────
 async def auto_bet_loop():
     """
-    3-Candle Strategy:
+    3-Candle REVERSAL Strategy:
     1. Wait for 3 identical candles (e.g. R-R-R).
-    2. Place bet IMMEDIATELY (within seconds) on the 4th candle in SAME direction.
+    2. Place bet IMMEDIATELY on the 4th candle in the OPPOSITE direction.
     3. If Win: Reset and wait for NEXT 3-candle pattern.
-    4. If Loss: Martingale ON NEXT candle until Win.
+    4. If Loss: Martingale ON NEXT candle (same direction) until Win.
     """
     console.print(f"[bold yellow]📊 Strategy Initialized: {config.STRATEGY_CANDLES}-Candle {config.STRATEGY_TYPE.upper()}[/bold yellow]")
     
