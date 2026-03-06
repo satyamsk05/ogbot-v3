@@ -55,9 +55,8 @@ def fetch_polymarket_candles(coin: str, interval: str = "15m", limit: int = 5):
         now = int(time.time())
         step = 300 if interval == "5m" else 900
         
-        # Optimization: Only look at the last 3 potential intervals (was 10)
-        # We only need the one that just closed and a bit of history.
-        for i in range(1, 4):
+        # Restore: Look at last 6 intervals to ensure 5 candles for UI
+        for i in range(1, 7):
             ts = ((now // step) - i) * step
             slug = f"{coin.lower()}-updown-{interval}-{ts}"
             url = f"https://gamma-api.polymarket.com/events?slug={slug}"
