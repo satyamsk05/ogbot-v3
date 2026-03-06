@@ -31,11 +31,15 @@ CANDLE_SOURCE       = "POLYMARKET" # "BINANCE" or "POLYMARKET"
 
 # ── Martingale Table ────────────────────────────────────
 def get_bet_amount(step: int) -> float:
-    """Returns bet amount for given Martingale step (1-indexed)."""
-    return BASE_BET * (2 ** (step - 1))
+    """
+    Returns aggressive bet amount based on user request:
+    $2, $6, $14, $30, $62, $126, $254...
+    Formula: 2^(step + 1) - 2
+    """
+    return float(2**(step + 1) - 2)
 
 MARTINGALE_TABLE = {i: get_bet_amount(i) for i in range(1, MAX_STEPS + 1)}
-# {1: 2, 2: 4, 3: 8, 4: 16, 5: 32, 6: 64, 7: 128}
+# {1: 2, 2: 6, 3: 14, 4: 30, 5: 62, 6: 126, 7: 254}
 
 # ── Backup / Crash Settings ─────────────────────────────
 RESTART_DELAY       = 30         # seconds before auto-restart

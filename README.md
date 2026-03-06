@@ -62,15 +62,15 @@ The bot uses a disciplined Martingale system to recover from individual losses. 
 ### 📈 Martingale Progression Table
 Based on your current `BASE_BET` of **$2.00**, here are the exact amounts the bot will wager at each step:
 
-| Step | Multiplier | Bet Amount | Cumulative Risk |
-| :--- | :--- | :--- | :--- |
-| **Step 1** | 1x | **$2.00** | $2.00 |
-| **Step 2** | 2x | **$4.00** | $6.00 |
-| **Step 3** | 4x | **$8.00** | $14.00 |
-| **Step 4** | 8x | **$16.00** | $30.00 |
-| **Step 5** | 16x | **$32.00** | $62.00 |
-| **Step 6** | 32x | **$64.00** | $126.00 |
-| **Step 7** | 64x | **$128.00** | $254.00 |
+| Step | Bet Amount | Cumulative Risk |
+| :--- | :--- | :--- |
+| **Step 1** | **$2.00** | $2.00 |
+| **Step 2** | **$6.00** | $8.00 |
+| **Step 3** | **$14.00** | $22.00 |
+| **Step 4** | **$30.00** | $52.00 |
+| **Step 5** | **$62.00** | $114.00 |
+| **Step 6** | **$126.00** | $240.00 |
+| **Step 7** | **$254.00** | $494.00 |
 
 > [!TIP]
 > You can adjust the starting amount with the telegram command `/setbet [amount]` or change the max steps with `/setstop [steps]`.
