@@ -197,18 +197,19 @@ async def auto_bet_loop():
             if bal < config.BALANCE_LOW_ALERT:
                 await tg.notify_balance_low(bal)
 
-        # Precise Sleep: Wait until ~1 second after the candle close
+        # Precision Polling: 
+        # Near close: Check every 1s
+        # Far from close: Check every 5s-10s
         now = time.time()
         interval_secs = 300 if config.STRATEGY_INTERVAL == "5m" else 900
         time_into_interval = now % interval_secs
-        sleep_time = interval_secs - time_into_interval + 1 # 1 second after close
         
-        # If we are very close to next check, just wait a bit
-        if sleep_time < 2: 
-            sleep_time = interval_secs + 1
+        # High-frequency window: 10s before to 30s after close
+        if time_into_interval > (interval_secs - 10) or time_into_interval < 30:
+            final_sleep = 1 # High speed polling
+        else:
+            final_sleep = 5 # Normal speed
             
-        # Limit sleep to max 30s to keep dashboard alive
-        final_sleep = min(sleep_time, 30)
         await asyncio.sleep(final_sleep)
 
 

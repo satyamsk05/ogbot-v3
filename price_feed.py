@@ -46,6 +46,8 @@ def fetch_klines(coin: str, interval: str = "5m", limit: int = 10):
         print(f"[PriceFeed] Binance fetch error for {coin}: {e}")
         return []
 
+from concurrent.futures import ThreadPoolExecutor
+
 def fetch_polymarket_candles(coin: str, interval: str = "15m", limit: int = 5):
     """Fetch recent outcomes from Polymarket events for the coin (Early detection)."""
     try:
@@ -53,14 +55,15 @@ def fetch_polymarket_candles(coin: str, interval: str = "15m", limit: int = 5):
         now = int(time.time())
         step = 300 if interval == "5m" else 900
         
-        # Start looking from the previous interval (the one that should have just closed)
-        for i in range(1, 10):
+        # Optimization: Only look at the last 3 potential intervals (was 10)
+        # We only need the one that just closed and a bit of history.
+        for i in range(1, 4):
             ts = ((now // step) - i) * step
             slug = f"{coin.lower()}-updown-{interval}-{ts}"
             url = f"https://gamma-api.polymarket.com/events?slug={slug}"
             
             try:
-                r = requests.get(url, timeout=10)
+                r = requests.get(url, timeout=5) # Reduced timeout to 5s
                 if r.status_code == 200:
                     data = r.json()
                     if data and len(data) > 0 and data[0].get("markets"):
@@ -72,14 +75,10 @@ def fetch_polymarket_candles(coin: str, interval: str = "15m", limit: int = 5):
                             outcomes = json.loads(outcomes_raw)
                             prices = json.loads(prices_raw)
                             
-                            # Detection Logic:
-                            # 1. Price is exactly "1" (officially resolved)
-                            # 2. Market is past expiration AND a price is > 0.8 (highly likely winner)
                             winner_idx = -1
                             if "1" in prices:
                                 winner_idx = prices.index("1")
                             elif now > (ts + step): # Past expiration
-                                # Find index of highest price
                                 float_prices = [float(p) for p in prices]
                                 max_p = max(float_prices)
                                 if max_p > 0.8:
@@ -97,7 +96,6 @@ def fetch_polymarket_candles(coin: str, interval: str = "15m", limit: int = 5):
                                     break
             except Exception:
                 pass
-            time.sleep(0.02)
         
         return results[::-1]
     except Exception as e:
@@ -105,15 +103,18 @@ def fetch_polymarket_candles(coin: str, interval: str = "15m", limit: int = 5):
         return []
 
 def update_all_candles():
-    """Update candles for all tracked coins based on config."""
-    for coin in COINS:
+    """Update candles for all tracked coins in PARALLEL."""
+    def _update(coin):
         if config.CANDLE_SOURCE == "POLYMARKET":
-            data = fetch_polymarket_candles(coin, interval=config.STRATEGY_INTERVAL)
+            return coin, fetch_polymarket_candles(coin, interval=config.STRATEGY_INTERVAL)
         else:
-            data = fetch_klines(coin, interval=config.STRATEGY_INTERVAL)
-            
-        if data:
-            candles[coin] = data
+            return coin, fetch_klines(coin, interval=config.STRATEGY_INTERVAL)
+
+    with ThreadPoolExecutor(max_workers=len(COINS)) as executor:
+        results = list(executor.map(_update, COINS))
+        for coin, data in results:
+            if data:
+                candles[coin] = data
 
 
 def _on_message(ws, message):
