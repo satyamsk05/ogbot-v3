@@ -628,27 +628,85 @@ async def handle_buttons(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 # ── NOTIFICATION HELPERS ─────────────────────────────────
 # ══════════════════════════════════════════════════════════
 
-async def notify_bet_placed(coin: str, direction: str, amount: float, step: int):
-    # Silent update
-    await update_dashboard(f"🎯 *{coin}* bet placed: `${amount:.0f}` {direction}")
+async def notify_bet_placed(coin: str, direction: str, amount: float, step: int, trend: str, streak: str):
+    """Sends a rich notification when a bet is placed."""
+    now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    # shares = amount / 0.5 (assuming 0.5 price)
+    shares = amount / 0.5 if amount else 0
+    
+    msg = [
+        "━━━━━━━━━━━━━━━━━━━━━━━━",
+        "📊 *Market Trend:*",
+        f"    {trend}",
+        f"    {streak}",
+        "",
+        f"🚀 *Action: {direction} (Reversal)*",
+        "──────────────────",
+        f"💰 *Stake:* `${amount:.2f}` (Step {step})",
+        "🎯 *Target:* `0.5000`",
+        f"📈 *Shares:* `{shares:.2f}`",
+        "──────────────────",
+        f"🕒 `{now_str}`"
+    ]
+    await send("\n".join(msg))
+    await update_dashboard(f"🚀 *{coin}* {direction} `${amount:.0f}` placed")
 
 
-async def notify_win(coin: str, amount: float, pnl: float):
-    # Silent update
+async def notify_win(coin: str, amount: float, pnl: float, balance: float):
+    """Sends a rich notification on a WIN."""
+    msg = [
+        f"🟢 *{coin} WIN!* (15m)",
+        "━━━━━━━━━━━━━━━━━━━━━━━━",
+        "🎯 *Side:* `WIN`",
+        f"💰 *Profit:* `+${pnl:.2f}`",
+        "──────────────────",
+        f"💳 *Balance:* `${balance:.2f}`",
+        "➡️ *Next:* `Step 1 (Reset)`"
+    ]
+    await send("\n".join(msg))
     await update_dashboard(f"✅ *{coin} WIN!* +`${pnl:.2f}`")
 
 
-async def notify_loss(coin: str, amount: float):
+async def notify_loss(coin: str, amount: float, next_amount: float, next_step: int, balance: float):
+    """Sends a rich notification on a LOSS."""
     s = states[coin]
     if s.stopped:
+        msg = [
+            f"🛑 *{coin} MAX STEPS REACHED!*",
+            "━━━━━━━━━━━━━━━━━━━━━━━━",
+            f"💸 *Total Lost:* `-${amount:.2f}`",
+            "⚠️ Bot has stopped for this coin.",
+            "──────────────────",
+            f"💳 *Balance:* `${balance:.2f}`"
+        ]
+        await send("\n".join(msg))
         await update_dashboard(f"🛑 *{coin}* 7-step limit! STOPPED")
     else:
+        msg = [
+            f"🔴 *{coin} LOSS* (15m)",
+            "━━━━━━━━━━━━━━━━━━━━━━━━",
+            "🎯 *Side:* `LOSS`",
+            f"💸 *Lost:* `-${amount:.2f}`",
+            "──────────────────",
+            f"💳 *Balance:* `${balance:.2f}`",
+            f"➡️ *Next:* `${next_amount:.0f}` (Step {next_step})"
+        ]
+        await send("\n".join(msg))
         await update_dashboard(f"❌ *{coin} LOSS!* -`${amount:.2f}`")
 
 
 async def notify_daily_summary():
+    """Daily summary alert."""
     total = sum(states[c].session_pnl for c in config.COINS)
-    await update_dashboard(f"📊 *Daily Summary:* Net `${total:.2f}`")
+    bal = get_balance()
+    msg = [
+        "📊 *Daily Trading Summary*",
+        "━━━━━━━━━━━━━━━━━━━━━━━━",
+        f"📈 *Net P&L:* `${total:.2f}`",
+        f"💳 *Total Balance:* `${bal:.2f}`",
+        "━━━━━━━━━━━━━━━━━━━━━━━━"
+    ]
+    await send("\n".join(msg))
 
 
 async def notify_restart(crash_count: int):

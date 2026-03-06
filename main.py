@@ -159,12 +159,14 @@ async def auto_bet_loop():
                     outcome, pnl = record_result(coin, st["active_side"], won, amount)
 
                     if won:
-                        await tg.notify_win(coin, amount, pnl)
+                        await tg.notify_win(coin, amount, pnl, get_balance())
                         st["in_recovery"] = False
                         st["waiting_for_pattern"] = True
                         st["active_side"] = None
                     else:
-                        await tg.notify_loss(coin, amount)
+                        s_next_step = s.step
+                        s_next_amt = s.next_bet_amount()
+                        await tg.notify_loss(coin, amount, s_next_amt, s_next_step, get_balance())
                         st["in_recovery"] = True
                         # st["waiting_for_pattern"] remains False, we bet on next candle
                 
@@ -188,8 +190,24 @@ async def auto_bet_loop():
 
                 # ── Step 3: Place Bet ──
                 if direction:
+                    # Calculate trend and streak for notification
+                    trend_icons = ["🟢" if c["color"] == "GREEN" else "🔴" for c in coin_candles[-5:]]
+                    trend_str = " ".join(trend_icons)
+                    
+                    # Calculate streak (last colors matching direction color)
+                    last_colors = [c["color"] for c in coin_candles]
+                    streak_count = 0
+                    if last_colors:
+                        last_c = last_colors[-1]
+                        for c in reversed(last_colors):
+                            if c == last_c:
+                                streak_count += 1
+                            else:
+                                break
+                    streak_label = f"⚡️ {streak_count}x {'GREEN' if last_c == 'GREEN' else 'RED'} streak"
+
                     amount = s.next_bet_amount()
-                    await tg.notify_bet_placed(coin, direction, amount, s.step)
+                    await tg.notify_bet_placed(coin, direction, amount, s.step, trend_str, streak_label)
                     place_bet(coin, direction)
 
             # Check Balance
