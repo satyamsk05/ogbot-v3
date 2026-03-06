@@ -145,16 +145,22 @@ def _on_open(ws):
 
 
 def _candle_loop():
-    """Background loop to update candles periodically (Fast Refresh)."""
+    """Adaptive Background loop: Fast polls near market closure."""
     while True:
         try:
             update_all_candles()
-            # print(f"[PriceFeed] Candles updated at {datetime.now().strftime('%H:%M:%S')}")
         except Exception as e:
             print(f"[PriceFeed] Error in candle loop: {e}")
         
-        # Increase frequency for a more responsive UI
-        time.sleep(15)
+        # Adaptive sleep: 
+        # Fast poll (2s) if near 5m mark (which includes 15m mark).
+        # We poll frequently 10s before and 30s after the mark.
+        now = int(time.time())
+        rem = now % 300 
+        if rem > 290 or rem < 30: 
+            time.sleep(2)
+        else:
+            time.sleep(15)
 
 def start():
     """Start Binance WebSocket price feed and candle loop."""

@@ -107,35 +107,22 @@ strategy_state = {
         "last_candle_time": "",
         "in_recovery": False,
         "active_side": None,
-        "waiting_for_pattern": True,
-        "startup_sync": True # Start in sync mode to avoid immediate bets
+        "waiting_for_pattern": True
     } for coin in config.COINS
 }
 
 # ── Auto Betting Loop (3-Candle Trend Strategy) ──────────
 async def auto_bet_loop():
     """
-    3-Candle Strategy with Safe-Start Safeguard:
+    3-Candle Strategy:
     1. Wait for 3 identical candles (e.g. R-R-R).
-    2. SAFE START: If pattern exists at startup, wait for 1 NEW candle of same color.
-    3. Place bet on next candle in SAME direction.
-    4. If Win: Reset and wait for NEXT 3-candle pattern.
-    5. If Loss: Martingale ON NEXT candle until Win.
+    2. Place bet IMMEDIATELY (within seconds) on the 4th candle in SAME direction.
+    3. If Win: Reset and wait for NEXT 3-candle pattern.
+    4. If Loss: Martingale ON NEXT candle until Win.
     """
     console.print(f"[bold yellow]📊 Strategy Initialized: {config.STRATEGY_CANDLES}-Candle {config.STRATEGY_TYPE.upper()}[/bold yellow]")
     
-    last_running_state = tg.bot_running
-    
     while True:
-        # ── Handle transition: STOP -> START ──
-        if tg.bot_running and not last_running_state:
-            console.print("[bold yellow]🔄 Bot Started: Resetting Safe-Start sync for all coins...[/bold yellow]")
-            for coin in config.COINS:
-                strategy_state[coin]["startup_sync"] = True
-                strategy_state[coin]["waiting_for_pattern"] = True
-        
-        last_running_state = tg.bot_running
-
         if tg.bot_running and tg.bot_mode == "auto":
             # Update candles first
             price_feed.update_all_candles()
@@ -193,14 +180,8 @@ async def auto_bet_loop():
                         direction = "UP" if config.STRATEGY_TYPE == "trend" else "DOWN"
                     
                     if direction:
-                        # ── Safe Start Check ──
-                        if st["startup_sync"]:
-                            st["startup_sync"] = False
-                            console.print(f"[bold cyan]🔄 {coin} Safe-Start: Syncing with existing trend...[/bold cyan]")
-                            direction = None # Don't bet yet, just update state
-                        else:
-                            st["waiting_for_pattern"] = False
-                            st["active_side"] = direction
+                        st["waiting_for_pattern"] = False
+                        st["active_side"] = direction
                 elif st["in_recovery"]:
                     # Martingale on next candle (stay in same direction)
                     direction = st["active_side"]
