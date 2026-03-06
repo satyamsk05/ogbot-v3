@@ -688,6 +688,13 @@ def start_telegram_bot():
         print("[Telegram] Dashboard Bot started ✅")
         await _app.initialize()
         await _app.start()
+
+        # Remove the 'Menu' button by deleting commands
+        try:
+            await _bot.delete_my_commands()
+        except:
+            pass
+
         await _app.updater.start_polling()
         await asyncio.Event().wait()
 
