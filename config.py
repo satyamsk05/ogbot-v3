@@ -25,7 +25,7 @@ PAPER_TRADING       = True       # Set to False for real money
 
 # ── Strategy Settings (3-Candle Pattern) ────────────────
 STRATEGY_CANDLES    = 3          # Wait for 3 identical candles
-STRATEGY_TYPE       = "trend"    # "trend" (follow 3 candles) or "reversal" (bet opposite)
+STRATEGY_TYPE       = "reversal" # "trend" (follow 3 candles) or "reversal" (bet opposite)
 STRATEGY_INTERVAL   = "15m"       # "5m" or "15m"
 CANDLE_SOURCE       = "POLYMARKET" # "BINANCE" or "POLYMARKET"
 

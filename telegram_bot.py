@@ -69,7 +69,7 @@ def get_dashboard_text() -> str:
         f"        🤖 *POLYMARKET BOT DASHBOARD*",
         f"        ────────────────────────",
         f"📊 *Status:* `{status_str}` | *Mode:* `{bot_mode.upper()}`",
-        f"⚙️ *Strategy:* `{config.STRATEGY_INTERVAL} {config.STRATEGY_TYPE.upper()}`",
+        f"⚙️📊 Strategy: `{config.STRATEGY_CANDLES}-Candle {config.STRATEGY_TYPE.upper()}`",
         f"💰 *{bal_label}:* `${bal:.2f}` USDC",
         f"🕐 *Last Update:* `{dt}`\n"
     ]
