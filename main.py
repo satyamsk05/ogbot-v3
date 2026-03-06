@@ -44,7 +44,7 @@ def build_dashboard() -> Table:
     table.add_column("Content", justify="left")
 
     # ── Header ──
-    table.add_row("[bold cyan]🤖 POLYMARKET VIP BOT — LIVE[/bold cyan]", justify="center")
+    table.add_row("[bold cyan]🤖 POLYMARKET VIP BOT — LIVE[/bold cyan]")
     table.add_section()
 
     # ── Prices Section ──

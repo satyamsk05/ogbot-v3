@@ -37,11 +37,24 @@ coin_enabled = {c: True for c in config.COINS}
 
 _app: Application | None = None
 _bot: Bot | None         = None
+_loop: asyncio.AbstractEventLoop | None = None
 _dashboard_msg_id: int | None = None
 _latest_event: str | None = None
 
 
-# ── Dashboard Helpers ─────────────────────────────────────
+# ── Thread-Safe Helper ───────────────────────────────────
+async def _safe_run(coro):
+    """Ensures a coroutine runs on the Telegram event loop."""
+    global _loop
+    try:
+        current_loop = asyncio.get_running_loop()
+    except RuntimeError:
+        current_loop = None
+
+    if _loop and _loop.is_running() and current_loop != _loop:
+        future = asyncio.run_coroutine_threadsafe(coro, _loop)
+        return await asyncio.wrap_future(future)
+    return await coro
 
 def get_dashboard_text() -> str:
     """Generates the formatted dashboard status text."""
@@ -89,7 +102,12 @@ def get_dashboard_text() -> str:
 
 
 async def update_dashboard(new_event: str | None = None):
-    """Edits the existing dashboard message or sends a new one if not found."""
+    """Edits the existing dashboard message (Thread-Safe)."""
+    return await _safe_run(_update_dashboard_logic(new_event))
+
+
+async def _update_dashboard_logic(new_event: str | None = None):
+    """Internal logic for updating the dashboard."""
     global _dashboard_msg_id, _latest_event
     
     if new_event:
@@ -154,7 +172,12 @@ def kb_dashboard() -> InlineKeyboardMarkup:
 
 # ── Send helper ──────────────────────────────────────────
 async def send(text: str, reply_markup=None):
-    """Fallback send helper (used only for critical errors or manual history)."""
+    """Fallback send helper (Thread-Safe)."""
+    return await _safe_run(_send_logic(text, reply_markup))
+
+
+async def _send_logic(text: str, reply_markup=None):
+    """Internal logic for sending a message."""
     if not _bot or not config.TELEGRAM_USER_ID:
         return
     try:
@@ -668,6 +691,10 @@ def start_telegram_bot():
         await _app.updater.start_polling()
         await asyncio.Event().wait()
 
-    loop = asyncio.new_event_loop()
-    t = threading.Thread(target=lambda: loop.run_until_complete(run()), daemon=True)
-    t.start()
+    def start_loop():
+        global _loop
+        _loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(_loop)
+        _loop.run_until_complete(run())
+
+    threading.Thread(target=start_loop, daemon=True).start()
