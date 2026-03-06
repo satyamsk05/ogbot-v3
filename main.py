@@ -29,63 +29,76 @@ crash_count = 0
 
 
 # ── Terminal Dashboard ───────────────────────────────────
+# ── Terminal Dashboard ───────────────────────────────────
 def build_dashboard() -> Table:
     p = price_feed.get_all_prices()
     bal = get_balance()
 
-    # Outer table
+    # Outer table using DOUBLE box for premium feel
     table = Table(
-        title="🤖 POLYMARKET BOT — LIVE",
-        box=box.DOUBLE_EDGE,
-        style="bold cyan",
+        box=box.DOUBLE,
+        style="cyan",
         show_header=False,
         expand=True,
     )
     table.add_column("Content", justify="left")
 
-    # ── Prices ──
+    # ── Header ──
+    table.add_row("[bold cyan]🤖 POLYMARKET VIP BOT — LIVE[/bold cyan]", justify="center")
+    table.add_section()
+
+    # ── Prices Section ──
     price_lines = []
     for coin in config.COINS:
         pr = p.get(coin, 0.0)
         decimals = 4 if coin == "XRP" else 2
-        price_lines.append(f"  {coin}: ${pr:,.{decimals}f}")
+        price_lines.append(f"  [bold white]{coin}[/bold white]: [green]${pr:,.{decimals}f}[/green]")
     table.add_row("\n".join(price_lines))
-    table.add_row("─" * 50)
+    table.add_section()
 
-    # ── Martingale status ──
+    # ── Martingale status Section ──
     for coin in config.COINS:
         s = states[coin]
-        status = "🛑 STOPPED" if s.stopped else ("✅" if s.active else "⏸")
+        status = "[bold green]🟢 RUN[/bold green]" if s.active and not s.stopped else \
+                 ("[bold red]🛑 STOP[/bold red]" if s.stopped else "[bold yellow]⏸ PAUSE[/bold yellow]")
+        
+        # Format history string
+        history = s.last_5()
+        
         table.add_row(
-            f"  {coin} {status}  Step {s.step}/{config.MAX_STEPS}  "
-            f"Bet: ${s.next_bet_amount():.0f}  Session: ${s.session_pnl:.2f}"
+            f"  {status} [bold]{coin:4}[/bold] Step [yellow]{s.step}/{config.MAX_STEPS}[/yellow] "
+            f"Bet: [bold]${s.next_bet_amount():.0f}[/bold] P&L: [green]${s.session_pnl:.2f}[/green]\n"
+            f"  History: {history}"
         )
-    table.add_row("─" * 50)
+    table.add_section()
 
-    # ── Net P&L + Balance ──
+    # ── Net P&L + Balance Section ──
     total_pnl = sum(states[c].session_pnl for c in config.COINS)
     mode_label = tg.bot_mode.upper() if hasattr(tg, "bot_mode") else "AUTO"
-    bal_label = "Virtual Balance" if config.PAPER_TRADING else "Real Balance"
+    bal_label = "V-Balance" if config.PAPER_TRADING else "Balance"
+    pnl_style = "green" if total_pnl >= 0 else "red"
+    
     table.add_row(
-        f"  Net P&L: ${total_pnl:.2f}  |  {bal_label}: ${bal:.2f}  |  Mode: {mode_label}"
+        f"  [bold yellow]NET P&L:[/bold yellow] [{pnl_style}]${total_pnl:.2f}[/{pnl_style}]  |  "
+        f"[bold blue]{bal_label}:[/bold blue] ${bal:.2f}  |  "
+        f"[bold magenta]MODE:[/bold magenta] {mode_label}"
     )
-    table.add_row("─" * 50)
+    table.add_section()
 
-    # ── Last 5 candles per coin ──
-    source_label = f"({config.CANDLE_SOURCE})"
-    table.add_row(f"  --- Last 5 Candles {source_label} ---")
+    # ── Last 5 candles Section ──
+    source_label = f"--- [bold white]Candles ({config.CANDLE_SOURCE})[/bold white] ---"
+    table.add_row(f"  {source_label}")
     for coin in config.COINS:
         coin_candles = price_feed.candles.get(coin, [])
         history_icons = []
-        # Get last 5 and format as UP/DOWN or icons
         for c in coin_candles[-5:]:
-            icon = "[bold green]UP[/bold green]" if c["color"] == "GREEN" else "[bold red]DOWN[/bold red]"
+            icon = "🟢" if c["color"] == "GREEN" else "🔴"
             history_icons.append(icon)
         
         history_str = " ".join(history_icons) if history_icons else "Loading data..."
-        table.add_row(f"  {coin}: {history_str}")
+        table.add_row(f"  [bold]{coin:4}[/bold]: {history_str}")
 
-    table.add_row(f"\n  🕐 {datetime.now().strftime('%H:%M:%S')}")
+    table.add_row(f"\n  🕐 [grey62]{datetime.now().strftime('%H:%M:%S')}[/grey62]")
     return table
 
 
