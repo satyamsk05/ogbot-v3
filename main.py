@@ -65,8 +65,9 @@ def build_dashboard() -> Table:
     # ── Net P&L + Balance ──
     total_pnl = sum(states[c].session_pnl for c in config.COINS)
     mode_label = tg.bot_mode.upper() if hasattr(tg, "bot_mode") else "AUTO"
+    bal_label = "Virtual Balance" if config.PAPER_TRADING else "Real Balance"
     table.add_row(
-        f"  Net P&L: ${total_pnl:.2f}  |  Balance: ${bal:.2f}  |  Mode: {mode_label}"
+        f"  Net P&L: ${total_pnl:.2f}  |  {bal_label}: ${bal:.2f}  |  Mode: {mode_label}"
     )
     table.add_row("─" * 50)
 

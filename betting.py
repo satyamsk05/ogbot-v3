@@ -85,6 +85,10 @@ states: dict[str, MartingaleState] = {
     coin: MartingaleState(coin) for coin in config.COINS
 }
 
+# Virtual Balance Store
+virtual_balance = config.VIRTUAL_BALANCE
+
+
 # ── CLOB Client ──────────────────────────────────────────
 _client: ClobClient | None = None
 
@@ -121,7 +125,10 @@ def get_client() -> ClobClient:
 
 
 def get_balance() -> float:
-    """Fetch current USDC balance from Polymarket."""
+    """Fetch current balance (Virtual or Real USDC)."""
+    if config.PAPER_TRADING:
+        return virtual_balance
+        
     try:
         from py_clob_client.clob_types import BalanceAllowanceParams, AssetType
         client = get_client()
@@ -163,18 +170,21 @@ def place_bet(coin: str, direction: str, amount: float | None = None) -> BetResu
     market_id = market.get("condition_id", "")
 
     # Place order via CLOB
-    try:
-        client = get_client()
-        order = client.create_and_post_order(OrderArgs(
-            token_id=token_id,
-            price=0.5,          # 50/50 market price
-            size=bet_amount,
-            side="BUY",
-        ))
-        print(f"[Betting] ✅ Order placed: {coin} {direction} ${bet_amount:.2f}")
-    except Exception as e:
-        print(f"[Betting] Order error for {coin}: {e}")
-        return None
+    if not config.PAPER_TRADING:
+        try:
+            client = get_client()
+            order = client.create_and_post_order(OrderArgs(
+                token_id=token_id,
+                price=0.5,          # 50/50 market price
+                size=bet_amount,
+                side="BUY",
+            ))
+            print(f"[Betting] ✅ Real Order placed: {coin} {direction} ${bet_amount:.2f}")
+        except Exception as e:
+            print(f"[Betting] Order error for {coin}: {e}")
+            return None
+    else:
+        print(f"[Betting] 🧪 Paper Bet (Simulated): {coin} {direction} ${bet_amount:.2f}")
 
     result = BetResult(
         coin=coin,
@@ -188,15 +198,21 @@ def place_bet(coin: str, direction: str, amount: float | None = None) -> BetResu
 
 
 def record_result(coin: str, direction: str, won: bool, amount: float):
-    """Call after market resolves to update Martingale state."""
+    """Call after market resolves to update Martingale state and Virtual Balance."""
+    global virtual_balance
     state = states[coin]
+    
     if won:
         pnl = amount * 0.95  # ~95% payout after fees
         state.on_win(pnl)
+        if config.PAPER_TRADING:
+            virtual_balance += pnl
         _log_csv(coin, direction, state.step, amount, "WIN", pnl)
         return "WIN", pnl
     else:
         state.on_loss(amount)
+        if config.PAPER_TRADING:
+            virtual_balance -= amount
         _log_csv(coin, direction, state.step, amount, "LOSS", -amount)
         return "LOSS", -amount
 
@@ -206,14 +222,18 @@ def _log_csv(coin, direction, step, amount, result, pnl):
         writer = csv.writer(f)
         writer.writerow([
             datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            coin, direction, step, amount, result, round(pnl, 2)
+            coin, direction, step, amount, result, round(pnl, 2),
+            "PAPER" if config.PAPER_TRADING else "REAL"
         ])
 
 
 def reset_all_martingales():
-    """Resets all coin Martingale states."""
+    """Resets all coin Martingale states and Virtual Balance."""
+    global virtual_balance
     for coin in states:
         states[coin].reset()
+    if config.PAPER_TRADING:
+        virtual_balance = config.VIRTUAL_BALANCE
     return True
 
 

@@ -20,6 +20,8 @@ BASE_BET            = 2.0        # Starting bet $2
 MAX_STEPS           = 7          # Max Martingale steps
 BET_INTERVAL        = 300        # 5 minutes in seconds
 BALANCE_LOW_ALERT   = 50.0       # Alert when balance < $50
+VIRTUAL_BALANCE     = 1000.0     # Starting virtual balance
+PAPER_TRADING       = True       # Set to False for real money
 
 # ── Strategy Settings (3-Candle Pattern) ────────────────
 STRATEGY_CANDLES    = 3          # Wait for 3 identical candles

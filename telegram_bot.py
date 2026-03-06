@@ -51,12 +51,13 @@ def get_dashboard_text() -> str:
     
     status_str = "🟢 RUNNING" if bot_running else "🔴 STOPPED"
     
+    bal_label = "Virtual Balance" if config.PAPER_TRADING else "Balance"
     lines = [
         f"        🤖 *POLYMARKET BOT DASHBOARD*",
         f"        ────────────────────────",
         f"📊 *Status:* `{status_str}` | *Mode:* `{bot_mode.upper()}`",
         f"⚙️ *Strategy:* `{config.STRATEGY_INTERVAL} {config.STRATEGY_TYPE.upper()}`",
-        f"💰 *Balance:* `${bal:.2f}` USDC",
+        f"💰 *{bal_label}:* `${bal:.2f}` USDC",
         f"🕐 *Last Update:* `{dt}`\n"
     ]
 
@@ -131,7 +132,7 @@ def kb_dashboard() -> InlineKeyboardMarkup:
     keyboard = [
         [
             InlineKeyboardButton("🔋 STATUS", callback_data="dash_refresh"),
-            InlineKeyboardButton("💎 WALLET", callback_data="dash_refresh")
+            InlineKeyboardButton("💎 " + ("V-WALLET" if config.PAPER_TRADING else "WALLET"), callback_data="dash_refresh")
         ],
         [
             InlineKeyboardButton("🟢 START BOT", callback_data="ctrl_start"),
